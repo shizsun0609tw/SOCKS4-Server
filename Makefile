@@ -18,13 +18,14 @@ TARGET = socks_server
 all:$(TARGET)
 
 $(TARGET):$(OBJ)
-	$(CXX) -o $@ $^
+	$(CXX) -o $@ $^ $(CFLAGS) $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS)
 
 $(DIR_OBJ)/%.o: $(DIR_SRC)/%.cpp
 	mkdir -p $(DIR_OBJ)
-	$(CXX) $(CFLAGS) -c -o $@ $<
+	$(CXX) -c -o $@ $< $(CFLAGS) $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS)
 
 
 .PHONY:clean
 clean:
 	rm -rf $(DIR_OBJ)/*.o
+	rm -f $(TARGET)
