@@ -62,20 +62,41 @@ void Session::PrintEnv()
 	std::cout << "--------------------------------------------" << std::endl;
 }
 
+void Session::PrintSock4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply)
+{
+	printf("---------------------------\n");
+	printf("<S_IP>: %s \n", S_IP.c_str());
+	printf("<S_PORT>: %s \n", S_PORT.c_str());
+	printf("<D_IP>: %s\n", D_IP.c_str());
+	printf("<D_PORT>: %s\n", D_PORT.c_str());
+	printf("<Command>: %s\n", command.c_str());
+	printf("<Reply>: %s\n", reply.c_str());
+	printf("---------------------------\n");
+}
+
 void Session::DoRead()
 {
 	auto self(shared_from_this());
+
+	memset(data_, 0, max_length);
 	socket_.async_read_some(boost::asio::buffer(data_, max_length),
 		[this, self](boost::system::error_code ec, std::size_t length)
 		{
 			if (ec) return;
-			
-			unsigned char VN = data_[0];
-			unsigned char CD = data_[1];
-			unsigned int DST_PORT = data_[2] << 8 | data_[3];
-			unsigned int DST_IP = data_[7] << 24 | data_[6] << 16 | data_[5] << 8 | data_[4];
+
 			unsigned char USER_ID[1024];
 			unsigned char DOMAIN_NAME[1024];
+
+			D_PORT = std::to_string((int)data_[2] * 256 + (int)(data_[3] < 0 ? data_[3] + 256 : data_[3]));
+
+			D_IP = "";
+			for (int i = 4; i < 8; ++i)
+			{
+				if (i != 4) D_IP += ".";
+				
+				int temp = (data_[i] < 0 ? (int)data_[i] + 256 : data_[i]);
+				D_IP += std::to_string(temp);
+			}
 
 			bool flag = false;
 			int count = 0;
@@ -99,52 +120,118 @@ void Session::DoRead()
 					++count;
 				}			
 			}
-
-			printf("---------------------------\n");
-			printf("<S_IP>: %s \n", socket_.remote_endpoint().address().to_string().c_str());
-			printf("<S_PORT>: %s \n", std::to_string(socket_.remote_endpoint().port()).c_str());
-			printf("<D_IP>: %u.%u.%u.%u\n", data_[4], data_[5], data_[6], data_[7]);
-			printf("<D_PORT>: %u\n", DST_PORT);
-			printf("<Command>: \n");
-			printf("<Reply>: \n");
-			printf("<USERID>: %s\n", USER_ID);
-			printf("<DOMAIN_NAME>: %s\n", DOMAIN_NAME);
-			printf("---------------------------\n");
 		
-/*	
-			std::string temp(data_);
-			std::istringstream iss(temp);
+			DoReply();
+		});
+}
 
-			iss >> REQUEST_METHOD >> REQUEST_URI >> SERVER_PROTOCOL >> temp >> HTTP_HOST;
+void Session::DoReadFromClient()
+{
+	auto self(shared_from_this());
 
-			SERVER_ADDR = socket_.local_endpoint().address().to_string();
-			REMOTE_ADDR = socket_.remote_endpoint().address().to_string();
+	memset(reply_from_client, 0, max_length);
+	socket_.async_read_some(boost::asio::buffer(reply_from_client),
+		[this, self](boost::system::error_code ec, std::size_t length)
+		{
+			if (ec) return;
+								
+			DoRequestToWeb(length);
+		});
+			
+}
 
-			SERVER_PORT = std::to_string(socket_.local_endpoint().port());
-			REMOTE_PORT = std::to_string(socket_.remote_endpoint().port());
+void Session::DoReadFromWeb()
+{
+	auto self(shared_from_this());
 
-			iss = std::istringstream(REQUEST_URI);
-			std::getline(iss, REQUEST_URI, '?');
-			std::getline(iss, QUERY_STRING);
+	memset(reply_from_web, 0, max_length);
+	(*web_socket).async_read_some(boost::asio::buffer(reply_from_web),
+		[this, self](boost::system::error_code ec, std::size_t length)
+		{
+			if (ec) return;
 
-			EXEC_FILE = boost::filesystem::current_path().string() + REQUEST_URI;
-
-			SetEnv();
-			PrintEnv();		
-*/
 			DoWrite(length);
 		});
 }
 
-void Session::DoWrite(std::size_t length)
+void Session::DoReply()
 {
+	char message[8];
+	std::string command;
+	std::string reply;
+
+	message[0] = 0;
+
+	if (data_[0] != 0x04)
+	{
+		message[1] = 0x5B;
+		reply = "Reject";
+	}
+	else if (data_[1] == 0x01)
+	{
+		command = "CONNECT";
+		reply = "Accept";
+	
+		message[1] = 0x5A;
+		for (int i = 2; i < 8; ++i)
+		{
+			message[i] = data_[i];
+		}
+	}
+	else if (data_[1] == 0x02)
+	{
+		command = "BIND";
+		reply = "Accept";
+	}
+	
+	PrintSock4Information(
+		socket_.remote_endpoint().address().to_string(),
+		std::to_string(socket_.remote_endpoint().port()),
+		D_IP, D_PORT, command, reply);
+		
 	auto self(shared_from_this());
-	boost::asio::async_write(socket_, boost::asio::buffer(status_str, status_str.length()),
-		[this, self](boost::system::error_code ec, std::size_t )
+	boost::asio::async_write(socket_, boost::asio::buffer(message, 8),
+		[this, self](boost::system::error_code ec, std::size_t)
 		{
 			if (ec) return;
 
+			web_socket = new tcp::socket(*Session::io_context_);
+			
+			//tcp::resolver resolver(*Session::io_context_);
+			//tcp::resolver::query query(D_IP, D_PORT);
+			//tcp::resolver::iterator iter = resolver.resolve(query);
+			//tcp::endpoint endpoint = *iter;
+	
+			tcp::endpoint endpoint(boost::asio::ip::address::from_string(D_IP), atoi((D_PORT).c_str()));
+	
+			(*web_socket).connect(endpoint);
+
+			DoReadFromWeb();		
+			DoReadFromClient();
+		});
+}
+
+void Session::DoWrite(int length)
+{
+	auto self(shared_from_this());
+	boost::asio::async_write(socket_, boost::asio::buffer(reply_from_web, length),
+		[this, self](boost::system::error_code ec, std::size_t len)
+		{
+			if (ec) return;
 			//DoCGI();
+			DoReadFromWeb();
+		});
+}
+
+void Session::DoRequestToWeb(int length)
+{
+	auto self(shared_from_this());
+
+	boost::asio::async_write((*web_socket), boost::asio::buffer(reply_from_client, length),
+		[this, self](boost::system::error_code ec, std::size_t len)
+		{
+			if (ec) return;
+			DoReadFromClient();
 		});
 }
 

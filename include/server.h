@@ -25,15 +25,27 @@ public:
 
 private:
 	void DoRead();
-	void DoWrite(std::size_t length);
+	void DoReadFromClient();
+	void DoReadFromWeb();
+	void DoRequestToWeb(int length);
+	void DoWrite(int length);
+	void DoReply();
 	void DoCGI();
 	void SetEnv();
 	void PrintEnv();
+	void PrintSock4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply);
 
 private:
 	tcp::socket socket_;
-	enum {max_length = 1024};
+	tcp::socket *web_socket;
+	enum {max_length = 10240};
 	char data_[max_length];	
+	char reply_from_web[max_length];
+	char reply_from_client[max_length];
+
+private:
+	std::string D_IP;
+	std::string D_PORT;
 
 private:
 	std::string status_str;
