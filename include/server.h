@@ -33,10 +33,7 @@ private:
 	void DoReplyReject();
 	void DoReplyConnect();
 	void DoReplyBind();
-	void DoCGI();
 	void ParseSOCK4Request(int length);
-	void SetEnv();
-	void PrintEnv();
 	void PrintSOCK4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply);
 
 private:

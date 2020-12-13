@@ -17,51 +17,6 @@ void Session::Start()
 	DoRead();
 }
 
-void Session::SetEnv()
-{
-	#ifdef __linux__
-	setenv("REQUEST_METHOD", REQUEST_METHOD.c_str(), 1);
-	setenv("REQUEST_URI", REQUEST_URI.c_str(), 1);
-	setenv("QUERY_STRING", QUERY_STRING.c_str(), 1);
-	setenv("SERVER_PROTOCOL", SERVER_PROTOCOL.c_str(), 1);
-	setenv("HTTP_HOST", HTTP_HOST.c_str(), 1);
-	setenv("SERVER_ADDR", SERVER_ADDR.c_str(), 1);
-	setenv("SERVER_PORT", SERVER_PORT.c_str(), 1);
-	setenv("REMOTE_ADDR", REMOTE_ADDR.c_str(), 1);
-	setenv("REMOTE_PORT", REMOTE_PORT.c_str(), 1);
-	setenv("EXEC_FILE", EXEC_FILE.c_str(), 1);
-	#endif
-}
-
-void Session::PrintEnv()
-{
-	#ifdef __linux__
-	REQUEST_METHOD = getenv("REQUEST_METHOD");
-	REQUEST_URI = getenv("REQUEST_URI");
-	QUERY_STRING = getenv("QUERY_STRING");
-	SERVER_PROTOCOL = getenv("SERVER_PROTOCOL");
-	HTTP_HOST = getenv("HTTP_HOST");
-	SERVER_ADDR = getenv("SERVER_ADDR");
-	SERVER_PORT = getenv("SERVER_PORT");
-	REMOTE_ADDR = getenv("REMOTE_ADDR");
-	REMOTE_PORT = getenv("REMOTE_PORT");
-	EXEC_FILE = getenv("EXEC_FILE");
-	#endif
-
-	std::cout << "--------------------------------------------" << std::endl;
-	std::cout << "REQUEST_METHOD: " << REQUEST_METHOD << std::endl;
-	std::cout << "REQUEST_URI: " << REQUEST_URI << std::endl;
-	std::cout << "QUERY_STRING: " << QUERY_STRING << std::endl;
-	std::cout << "SERVER_PROTOCOL: " << SERVER_PROTOCOL << std::endl;
-	std::cout << "HTTP_HOST: " << HTTP_HOST << std::endl;
-	std::cout << "SERVER_ADDR: " << SERVER_ADDR << std::endl;
-	std::cout << "SERVER_PORT: " << SERVER_PORT << std::endl;
-	std::cout << "REMOTE_ADDR: " << REMOTE_ADDR << std::endl;
-	std::cout << "REMOTE_PORT: " << REMOTE_PORT << std::endl;
-	std::cout << "EXEC_FILE: " << EXEC_FILE << std::endl;
-	std::cout << "--------------------------------------------" << std::endl;
-}
-
 void Session::PrintSOCK4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply)
 {
 	printf("---------------------------\n");
@@ -287,7 +242,7 @@ void Session::DoWriteToClient(int length)
 		[this, self](boost::system::error_code ec, std::size_t len)
 		{
 			if (ec) return;
-			//DoCGI();
+
 			DoReadFromWeb();
 		});
 }
@@ -300,36 +255,9 @@ void Session::DoRequestToWeb(int length)
 		[this, self](boost::system::error_code ec, std::size_t len)
 		{
 			if (ec) return;
+
 			DoReadFromClient();
 		});
-}
-
-void Session::DoCGI()
-{
-	(*Session::io_context_).notify_fork(boost::asio::io_context::fork_prepare);
-
-	if (fork() != 0)
-	{
-		(*Session::io_context_).notify_fork(boost::asio::io_context::fork_parent);
-		socket_.close();
-	}
-	else
-	{
-		(*Session::io_context_).notify_fork(boost::asio::io_context::fork_child);
-		int sock = socket_.native_handle();
-		
-		dup2(sock, STDERR_FILENO);
-		dup2(sock, STDIN_FILENO);
-		dup2(sock, STDOUT_FILENO);
-
-		socket_.close();
-
-		if (execlp(EXEC_FILE.c_str(), EXEC_FILE.c_str(), NULL) < 0)
-		{
-			std::cout << "Content-type:text/html\r\n\r\n<h1>Fail</h1>";
-			fflush(stdout);
-		}
-	}
 }
 
 Server::Server(boost::asio::io_context& io_context, short port)
