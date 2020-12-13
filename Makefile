@@ -14,11 +14,15 @@ CXX_LIB_DIRS = /usr/local/lib
 CXX_LIB_PARAMS = $(addprefix -L, $(CXX_LIB_DIRS))
 
 TARGET = socks_server
+TARGET2 = console
 
-all:$(TARGET)
+all:$(TARGET) $(TARGET2)
 
-$(TARGET):$(OBJ)
+$(TARGET):$(filter-out $(DIR_OBJ)/$(TARGET2).o, $(OBJ))
 	$(CXX) -o $@ $^ $(CFLAGS) $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS)
+
+$(TARGET2):$(DIR_OBJ)/$(TARGET2).o
+	$(CXX) -o hw4.cgi $< $(CFLAGS) $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS)
 
 $(DIR_OBJ)/%.o: $(DIR_SRC)/%.cpp
 	mkdir -p $(DIR_OBJ)
@@ -29,3 +33,4 @@ $(DIR_OBJ)/%.o: $(DIR_SRC)/%.cpp
 clean:
 	rm -rf $(DIR_OBJ)/*.o
 	rm -f $(TARGET)
+	rm -f $(TARGET2)

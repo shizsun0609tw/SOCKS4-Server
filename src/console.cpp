@@ -49,11 +49,11 @@ void Console::InitClients()
 
 		}
 	}
-}
 
-void Console::SetWebSocket(boost::asio::ip::tcp::socket *socket)
-{
-	web_socket = socket;
+	iss >> temp;
+	sh = temp.substr(3, temp.length() - 1);
+	iss >> temp;
+	sp = temp.substr(3, temp.length() - 1);	
 }
 
 void Console::SetQuery(std::string query_string)
@@ -65,11 +65,40 @@ void Console::Link2Server()
 {
 	for (int i = 0; i < (int)clients.size(); ++i)
 	{
+		std::string sock_request = "";
+
+		sock_request += (char)4;
+		sock_request += (char)1;
+
+		int temp = clients[i].serverPort / 256;
+		sock_request += (char)(temp > 128 ? temp - 256 : temp);
+		temp = clients[i].serverPort % 256;
+		sock_request += (char)(temp > 128 ? temp - 256 : temp);
+
+		sock_request += (char)0;
+		sock_request += (char)0;
+		sock_request += (char)0;
+		sock_request += (char)1;
+
+		sock_request += (char)0;
+
+		sock_request += clients[i].serverAddr;
+		sock_request += (char)0;
+	
 		boost::asio::ip::tcp::resolver resolver(global_io_context);
-		boost::asio::ip::tcp::resolver::query query(clients[i].serverAddr, std::to_string(clients[i].serverPort));
+		boost::asio::ip::tcp::resolver::query query(sh, sp);
 		boost::asio::ip::tcp::resolver::iterator iter = resolver.resolve(query);
 		boost::asio::ip::tcp::endpoint endpoint = *iter;
+
 		clients[i].socket.connect(endpoint);
+		
+		boost::asio::async_write(clients[i].socket, boost::asio::buffer(sock_request),
+			[this, i](boost::system::error_code ec, std::size_t len)
+			{
+				if (ec) return;
+
+				GetSOCK4Reply(i);
+			});
 	}
 }
 
@@ -77,13 +106,6 @@ void Console::Run()
 {
 	SendInitialHTML();
 
-	for (int i = 0; i < (int)clients.size(); ++i)
-	{
-		std::vector<std::string> input = GetShellInput(clients[i].testFile);	
-
-		GetShellOutput(i, input);
-	}
-	
 	global_io_context.run();
 }
 
@@ -162,15 +184,6 @@ void Console::SendShellInput(int session, std::vector<std::string> input)
 {
 	if (input.size() == 0) return;
 
-	boost::asio::deadline_timer timer(global_io_context);
-
-	timer.expires_from_now(boost::posix_time::seconds(2));
-
-	timer.wait();
-
-	timer.async_wait([this, input, session](boost::system::error_code ec)
-	{
-
 	boost::asio::async_write(clients[session].socket, boost::asio::buffer(input[0], input[0].length()),
 		[this, input, session](boost::system::error_code ec, std::size_t )
 		{
@@ -202,7 +215,6 @@ void Console::SendShellInput(int session, std::vector<std::string> input)
 
 			GetShellOutput(session, temp);
 		});
-	});
 }
 
 void Console::SendShellOutput(int session, std::string content)
@@ -228,6 +240,22 @@ void Console::SendShellOutput(int session, std::string content)
 
 	std::string temp = "<script>document.getElementById(\'s" + std::to_string(session) + "\').innerHTML += \'" + content + "\';</script>";
 	DoWrite(temp);
+}
+
+void Console::GetSOCK4Reply(int session)
+{
+	clients[session].socket.async_read_some((boost::asio::buffer(clients[session].data_, 8)),
+		[this, session](boost::system::error_code ec, std::size_t length)
+		{
+			if (ec || clients[session].data_[0] != 0) 
+			{
+				clients[session].socket.close();
+				return;
+			}
+
+			std::vector<std::string> input = GetShellInput(clients[session].testFile);
+			GetShellOutput(session, input);
+		});
 }
 
 std::vector<std::string> Console::GetShellInput(std::string testFile)
@@ -257,10 +285,17 @@ void Console::GetShellOutput(int session, std::vector<std::string> input)
 		{
 			if (ec)	
 			{
+				if (ec == boost::asio::error::eof)
+				{
+					clients[session].socket.close();
+				}
+
 				return;
 			}
 
-			std::string temp(clients[session].data_);
+			std::string temp = "";
+			for (int i = 0; i < (int)length; ++i) temp += clients[session].data_[i];
+
 			memset(clients[session].data_, 0, 10240);
 
 			SendShellOutput(session, temp);

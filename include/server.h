@@ -48,6 +48,7 @@ private:
 	char reply_from_client[max_length];
 
 private:
+	std::string DOMAIN_NAME;
 	std::string D_IP;
 	std::string D_PORT;
 

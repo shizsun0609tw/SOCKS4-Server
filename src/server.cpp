@@ -32,9 +32,9 @@ void Session::PrintSOCK4Information(std::string S_IP, std::string S_PORT, std::s
 void Session::ParseSOCK4Request(int length)
 {
 	unsigned char USER_ID[1024];
-	unsigned char DOMAIN_NAME[1024];
+	unsigned char DOMAIN_NAME_TEMP[1024];
 
-	D_PORT = std::to_string((int)data_[2] * 256 + (int)(data_[3] < 0 ? data_[3] + 256 : data_[3]));
+	D_PORT = std::to_string((int)(data_[2] < 0 ? (data_[2] + 256) * 256 : data_[2] * 256) + (int)(data_[3] < 0 ? data_[3] + 256 : data_[3]));
 
 	D_IP = "";
 	for (int i = 4; i < 8; ++i)
@@ -62,12 +62,13 @@ void Session::ParseSOCK4Request(int length)
 		}
 		else
 		{
-			DOMAIN_NAME[count] = data_[i];
-			DOMAIN_NAME[count + 1] = '\0';
+			DOMAIN_NAME_TEMP[count] = data_[i];
+			DOMAIN_NAME_TEMP[count + 1] = '\0';
 			++count;
 		}			
 	}
-	
+
+	DOMAIN_NAME = std::string((char*)DOMAIN_NAME_TEMP);	
 }
 
 void Session::DoRead()
@@ -108,7 +109,16 @@ void Session::DoReadFromWeb()
 	(*web_socket).async_read_some(boost::asio::buffer(reply_from_web),
 		[this, self](boost::system::error_code ec, std::size_t length)
 		{
-			if (ec) return;
+			if (ec)
+			{
+				if (ec == boost::asio::error::eof)
+				{
+					(*web_socket).close();
+					(socket_).close();
+				}
+
+				return;
+			}
 
 			DoWriteToClient(length);
 		});
@@ -119,7 +129,7 @@ void Session::DoReply()
 	std::string command;
 	std::string reply;
 
-	if (data_[0] != 0x04)
+	if (data_[0] != 0x04 || D_IP == "0.0.0.0")
 	{
 		reply = "Reject";
 
@@ -156,15 +166,6 @@ void Session::DoReplyReject()
 		[this, self](boost::system::error_code ec, std::size_t)
 		{
 			if (ec) return;
-
-			web_socket = new tcp::socket(*Session::io_context_);
-			
-			tcp::endpoint endpoint(boost::asio::ip::address::from_string(D_IP), atoi((D_PORT).c_str()));
-	
-			(*web_socket).connect(endpoint);
-
-			DoReadFromWeb();		
-			DoReadFromClient();
 		});
 
 }
@@ -183,9 +184,21 @@ void Session::DoReplyConnect()
 			if (ec) return;
 
 			web_socket = new tcp::socket(*Session::io_context_);
-			
-			tcp::endpoint endpoint(boost::asio::ip::address::from_string(D_IP), atoi((D_PORT).c_str()));
-	
+
+			tcp::endpoint endpoint;
+
+			if (D_IP[0] == '0')
+			{
+				tcp::resolver resolver(*Session::io_context_);
+				tcp::resolver::query query(DOMAIN_NAME, D_PORT);
+				tcp::resolver::iterator iter = resolver.resolve(query);
+				endpoint = *iter;
+			}
+			else
+			{
+				endpoint = tcp::endpoint(boost::asio::ip::address::from_string(D_IP), atoi((D_PORT).c_str()));
+			}
+
 			(*web_socket).connect(endpoint);
 
 			DoReadFromWeb();		

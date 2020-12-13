@@ -24,7 +24,6 @@ public:
 	
 public:
 	void InitClients();
-	void SetWebSocket(boost::asio::ip::tcp::socket *socket);
 	void SetQuery(std::string query_string);
 	void Link2Server();
 	void Run();
@@ -34,12 +33,15 @@ private:
 	void SendShellInput(int session, std::vector<std::string> input);
 	void SendShellOutput(int session, std::string content);
 	std::vector<std::string> GetShellInput(std::string testFile);
+	void GetSOCK4Reply(int session);
 	void GetShellOutput(int session, std::vector<std::string> input);
 	void DoWrite(std::string content);
 
 private:
 	std::string QUERY_STRING;
+	std::string sh;
+	std::string sp;
 	std::vector<Client> clients;
-	boost::asio::ip::tcp::socket *web_socket;
+	boost::asio::ip::tcp::socket *sock4_socket;
 };
 
