@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -35,6 +37,9 @@ private:
 	void DoReplyBind();
 	void ParseSOCK4Request(int length);
 	void PrintSOCK4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply);
+
+private:
+	bool CheckFirewall(char command);
 
 private:
 	tcp::socket socket_;
@@ -75,4 +80,5 @@ private:
 
 private:
 	tcp::acceptor acceptor_;
+	std::vector<pid_t> pid_pool;
 };

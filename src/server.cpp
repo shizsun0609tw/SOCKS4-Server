@@ -1,5 +1,8 @@
 #include "server.h"
 
+#include <fstream>
+#include <regex>
+
 boost::asio::io_context *Session::io_context_;
 
 Session::Session(tcp::socket socket) : socket_(std::move(socket))
@@ -19,10 +22,22 @@ void Session::Start()
 
 void Session::PrintSOCK4Information(std::string S_IP, std::string S_PORT, std::string D_IP, std::string D_PORT, std::string command, std::string reply)
 {
+	std::string parse_ip;
+
+	if (D_IP[0] == '0')
+	{
+		tcp::resolver resolver(*Session::io_context_);
+		tcp::resolver::query query(DOMAIN_NAME, D_PORT);
+		tcp::resolver::iterator iter = resolver.resolve(query);
+		tcp::endpoint endpoint = *iter;	
+		parse_ip = endpoint.address().to_string();
+	}
+
 	printf("---------------------------\n");
 	printf("<S_IP>: %s \n", S_IP.c_str());
 	printf("<S_PORT>: %s \n", S_PORT.c_str());
 	printf("<D_IP>: %s\n", D_IP.c_str());
+	if (parse_ip != "") printf("<D_IP>: %s(parse)\n", parse_ip.c_str());
 	printf("<D_PORT>: %s\n", D_PORT.c_str());
 	printf("<Command>: %s\n", command.c_str());
 	printf("<Reply>: %s\n", reply.c_str());
@@ -94,7 +109,15 @@ void Session::DoReadFromClient()
 	socket_.async_read_some(boost::asio::buffer(reply_from_client),
 		[this, self](boost::system::error_code ec, std::size_t length)
 		{
-			if (ec) return;
+			if (ec) 
+			{
+				if (ec == boost::asio::error::eof)
+				{
+					(*web_socket).close();
+					(socket_).close();
+				}
+				return;
+			}
 								
 			DoRequestToWeb(length);
 		});
@@ -129,7 +152,7 @@ void Session::DoReply()
 	std::string command;
 	std::string reply;
 
-	if (data_[0] != 0x04 || D_IP == "0.0.0.0")
+	if (data_[0] != 0x04 || D_IP == "0.0.0.0" || !CheckFirewall(data_[1]))
 	{
 		reply = "Reject";
 
@@ -273,6 +296,70 @@ void Session::DoRequestToWeb(int length)
 		});
 }
 
+bool Session::CheckFirewall(char command)
+{
+	std::ifstream fp;
+
+	fp.open("socks.conf");
+
+	if (!fp)
+	{
+		std::cout << "Can't find fire wall file" << std::endl;
+		return true;
+	}
+	
+	std::string rule;
+	
+	while(std::getline(fp, rule))
+	{
+		std::stringstream s(rule);
+		std::string event, type, ip;
+
+		s >> event >> type >> ip;
+	
+		std::string check_ip;
+
+		if (D_IP[0] == '0')
+		{
+			tcp::resolver resolver(*Session::io_context_);
+			tcp::resolver::query query(DOMAIN_NAME, D_PORT);
+			tcp::resolver::iterator iter = resolver.resolve(query);
+			tcp::endpoint endpoint = *iter;	
+			check_ip = endpoint.address().to_string();
+		}
+		else
+		{
+			check_ip = D_IP;
+		}
+
+	
+		if (event == "permit" && ((type == "c" && command == 0x01) || (type == "b" && command == 0x02)))
+		{
+			std::string reg_string;
+			for (int i = 0; i < (int)ip.length(); ++i)
+			{
+				if (ip[i] == '*')
+				{
+					reg_string += "[0-9]+";	
+				}
+				else
+				{
+					reg_string += ip[i];
+				}
+			}
+
+			std::regex reg(reg_string);
+			if (regex_match(check_ip, reg))
+			{
+				fp.close();
+				return true;
+			}
+		}
+	}	
+	fp.close();
+	return false;
+}
+
 Server::Server(boost::asio::io_context& io_context, short port)
 		: acceptor_(io_context, tcp::endpoint(tcp::v4(), port))
 {
@@ -290,10 +377,22 @@ void Server::DoAccept()
 			
 			(*Session::io_context_).notify_fork(boost::asio::io_context::fork_prepare);
 
-			if (fork() != 0)
+			pid_t pid = fork();
+
+			if (pid != 0)
 			{
 				(*Session::io_context_).notify_fork(boost::asio::io_context::fork_parent);
 				socket.close();
+
+				pid_pool.push_back(pid);
+
+				int waitPID, status;
+				for (int i = 0; i < (int)pid_pool.size(); ++i)
+				{
+					waitPID = waitpid(pid_pool[i], &status, WNOHANG);
+					if (waitPID == pid_pool[i]) pid_pool.erase(pid_pool.begin() + i, pid_pool.begin() + i + 1);
+				}
+
 				DoAccept();
 			}
 			else
@@ -301,6 +400,8 @@ void Server::DoAccept()
 				(*Session::io_context_).notify_fork(boost::asio::io_context::fork_child);
 				std::make_shared<Session>(std::move(socket))->Start();
 			}
+
+			
 		}
 	);
 }
